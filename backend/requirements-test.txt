@@ -1,0 +1,20 @@
+# Wymagania dla testów systemu Kożu Ofiarny
+
+# Podstawowe biblioteki (już zainstalowane)
+pandas>=2.0.0
+pyarrow>=10.0.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Biblioteki testowe
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+httpx>=0.24.0
+coverage>=7.0.0
+requests>=2.28.0
+
+# Biblioteki pomocnicze dla testów
+testfixtures>=7.0.0
+freezegun>=1.2.0  # Do testowania dat/czasu
+factory-boy>=3.2.0  # Do generowania danych testowych

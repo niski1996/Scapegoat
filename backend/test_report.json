@@ -1,0 +1,14 @@
+{
+  "timestamp": "2025-08-24T19:03:13.596115",
+  "environment": {
+    "python_version": "3.12.8",
+    "platform": "linux",
+    "working_directory": "/home/kali/Desktop/praca/Scapegoat/backend"
+  },
+  "test_results": {
+    "unit_tests": "FAIL",
+    "integration_tests": "FAIL",
+    "performance_tests": "FAIL"
+  },
+  "overall_status": "FAIL"
+}
