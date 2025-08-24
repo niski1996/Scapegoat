@@ -4,6 +4,7 @@ Kompletny prototyp systemu do generowania, transformacji i pobierania danych Par
 
 ## 📋 Spis treści
 
+- [🚀 Szybki start z Docker](#szybki-start-z-docker)
 - [Opis systemu](#opis-systemu)
 - [Architektura](#architektura)
 - [Instalacja i uruchomienie](#instalacja-i-uruchomienie)
@@ -12,6 +13,53 @@ Kompletny prototyp systemu do generowania, transformacji i pobierania danych Par
 - [Frontend](#frontend)
 - [Profilowanie i logowanie](#profilowanie-i-logowanie)
 - [Struktura projektu](#struktura-projektu)
+
+## 🚀 Szybki start z Docker
+
+### Wymagania
+- Docker
+- Docker Compose
+
+### Uruchomienie systemu
+
+```bash
+# Uruchom skrypt automatyczny
+./run-docker.sh
+
+# Lub manualnie:
+docker-compose up -d
+```
+
+### Dostępne adresy po uruchomieniu
+- **Frontend Angular**: http://localhost:4200
+- **Backend API**: http://localhost:8000
+- **Swagger Docs**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+### Docker Commands
+
+```bash
+# Budowanie
+docker-compose build
+
+# Uruchomienie w tle
+docker-compose up -d
+
+# Sprawdzenie statusu
+docker-compose ps
+
+# Logi w czasie rzeczywistym
+docker-compose logs -f
+
+# Restart systemu
+docker-compose restart
+
+# Zatrzymanie
+docker-compose down
+
+# Pełne czyszczenie (usuwa kontenery, wolumeny, obrazy)
+docker-compose down -v --rmi all
+```
 
 ## 📖 Opis systemu
 

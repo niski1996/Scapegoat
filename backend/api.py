@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from enum import Enum
 import pandas as pd
 import pyarrow.parquet as pq
 import io
@@ -39,6 +40,13 @@ app = FastAPI(
     description="System generowania, transformacji i pobierania danych Parquet z pivotowaniem",
     version="1.0.0"
 )
+
+# Enums dla API
+class FileFormat(str, Enum):
+    """Dostępne formaty plików do pobierania."""
+    csv = "csv"
+    parquet = "parquet"
+    zip = "zip"
 
 # CORS middleware
 app.add_middleware(
@@ -189,10 +197,10 @@ async def transform_data(request: TransformRequest):
 
 @app.get("/download")
 async def download_data(
-    format: str = Query("csv", regex="^(csv|parquet)$"),
-    pivoted: bool = Query(False),
-    filename: Optional[str] = Query(None),
-    batch_dir: Optional[str] = Query(None)
+    format: FileFormat = Query(FileFormat.csv, description="Format pliku do pobrania"),
+    pivoted: bool = Query(False, description="Czy pobierać dane pivotowane (z batchów)"),
+    filename: Optional[str] = Query(None, description="Nazwa pliku oryginalnego (jeśli pivoted=False)"),
+    batch_dir: Optional[str] = Query(None, description="Nazwa katalogu batchów (jeśli pivoted=True)")
 ):
     """
     Endpoint do pobierania danych w różnych formatach.
@@ -204,7 +212,7 @@ async def download_data(
         batch_dir: Katalog z batchami (dla danych pivotowanych)
     """
     try:
-        with TimeProfiler(f"Pobieranie danych w formacie {format}"):
+        with TimeProfiler(f"Pobieranie danych w formacie {format.value}"):
             
             if pivoted:
                 # Pobieranie danych pivotowanych (z batchów)
@@ -220,7 +228,7 @@ async def download_data(
         raise HTTPException(status_code=500, detail=f"Błąd pobierania danych: {str(e)}")
 
 
-async def download_original_data(format: str, filename: Optional[str]):
+async def download_original_data(format: FileFormat, filename: Optional[str]):
     """
     Pobiera oryginalne (niepivotowane) dane.
     """
@@ -238,10 +246,10 @@ async def download_original_data(format: str, filename: Optional[str]):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Plik {filename} nie istnieje")
     
-    if format == "csv":
+    if format == FileFormat.csv:
         # Streamowanie CSV
         return await stream_parquet_as_csv(file_path)
-    else:
+    elif format == FileFormat.parquet:
         # Pobieranie Parquet
         return FileResponse(
             path=str(file_path),
@@ -250,7 +258,7 @@ async def download_original_data(format: str, filename: Optional[str]):
         )
 
 
-async def download_pivoted_data(format: str, batch_dir: Optional[str]):
+async def download_pivoted_data(format: FileFormat, batch_dir: Optional[str]):
     """
     Pobiera pivotowane dane (z batchów).
     """
@@ -267,12 +275,15 @@ async def download_pivoted_data(format: str, batch_dir: Optional[str]):
     if not batch_path.exists():
         raise HTTPException(status_code=404, detail=f"Katalog batchów {batch_dir} nie istnieje")
     
-    if format == "csv":
+    if format == FileFormat.csv:
         # Zipowane CSV z wszystkich batchów
         return await create_batched_csv_zip(batch_path)
-    else:
+    elif format == FileFormat.zip:
         # Zipowane pliki Parquet
         return await create_batched_parquet_zip(batch_path)
+    else:  # FileFormat.parquet
+        # Pojedynczy plik Parquet z połączonymi batchami
+        return await create_merged_parquet(batch_path)
 
 
 async def stream_parquet_as_csv(file_path: Path):
@@ -369,10 +380,47 @@ async def create_batched_parquet_zip(batch_path: Path):
     )
 
 
+async def create_merged_parquet(batch_path: Path):
+    """
+    Łączy wszystkie batche w jeden plik Parquet.
+    """
+    merged_filename = f"{batch_path.name}_merged.parquet"
+    temp_merged_path = TEMP_DIR / merged_filename
+    
+    # Znajdź wszystkie pliki batch
+    batch_files = sorted(batch_path.glob("batch_*.parquet"))
+    
+    if not batch_files:
+        raise HTTPException(status_code=404, detail="Brak plików batch w katalogu")
+    
+    # Połącz wszystkie DataFrame
+    dfs = []
+    for batch_file in batch_files:
+        df = pd.read_parquet(batch_file)
+        dfs.append(df)
+    
+    # Połącz w jeden DataFrame
+    merged_df = pd.concat(dfs, ignore_index=True)
+    
+    # Zapisz jako Parquet
+    merged_df.to_parquet(temp_merged_path, compression='snappy')
+    
+    return FileResponse(
+        path=str(temp_merged_path),
+        filename=merged_filename,
+        media_type="application/octet-stream"
+    )
+
+
 @app.get("/files")
 async def list_files():
     """
     Zwraca listę dostępnych plików i batchów.
+    
+    Returns:
+        dict: Zawiera:
+            - original_files: Lista plików Parquet z metadanymi
+            - batch_directories: Lista katalogów batchów z informacjami o batch_dir
     """
     try:
         # Pliki oryginalne
@@ -393,9 +441,12 @@ async def list_files():
                     batch_info = get_batch_info(str(dir_path))
                     batch_dirs.append({
                         "directory": dir_path.name,
+                        "batch_dir": dir_path.name,  # Dodatkowe pole dla zgodności z parametrem API
+                        "full_path": str(dir_path.relative_to(Path.cwd())),
                         "batch_count": batch_info.get("total_batches", 0),
                         "total_rows": batch_info.get("total_rows", 0),
                         "total_size_mb": batch_info.get("total_size_mb", 0),
+                        "source_file": batch_info.get("source_file", "unknown"),
                         "modified": datetime.fromtimestamp(dir_path.stat().st_mtime).isoformat()
                     })
                 except Exception as e:
