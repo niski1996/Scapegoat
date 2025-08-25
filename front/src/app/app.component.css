@@ -1,0 +1,333 @@
+/* Kożucha Ofiarny - Style główne */
+
+/* Reset i podstawowe style */
+* {
+  box-sizing: border-box;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f5f7fa;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding: 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.header p {
+  margin: 0;
+  font-size: 1.2rem;
+  opacity: 0.9;
+}
+
+/* Main content */
+.main-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 2rem;
+}
+
+/* Karty sekcji */
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e1e8ed;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.card h2 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.5rem;
+  color: #2c3e50;
+  border-bottom: 3px solid #3498db;
+  padding-bottom: 0.5rem;
+}
+
+/* Formularze */
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #34495e;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e1e8ed;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.form-group input[type="checkbox"] {
+  width: auto;
+  margin-right: 0.5rem;
+  transform: scale(1.2);
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Przyciski */
+.btn {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 180px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: white;
+  box-shadow: 0 4px 15px rgba(155, 89, 182, 0.3);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(155, 89, 182, 0.4);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #27ae60, #229954);
+  color: white;
+  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3);
+}
+
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(39, 174, 96, 0.4);
+}
+
+.btn-info {
+  background: linear-gradient(135deg, #17a2b8, #138496);
+  color: white;
+  box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
+  padding: 0.5rem 1.5rem;
+  min-width: auto;
+}
+
+.btn-info:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(23, 162, 184, 0.4);
+}
+
+/* Status systemu */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.status-item {
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #3498db;
+}
+
+.status-item strong {
+  display: block;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+}
+
+.status-online {
+  color: #27ae60;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* Logi operacji */
+.logs {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.log-entry {
+  padding: 0.75rem;
+  border-bottom: 1px solid #e1e8ed;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #6c757d;
+  min-width: 80px;
+}
+
+.log-message {
+  flex: 1;
+}
+
+.log-success {
+  border-left: 4px solid #27ae60;
+  background: rgba(39, 174, 96, 0.05);
+}
+
+.log-error {
+  border-left: 4px solid #e74c3c;
+  background: rgba(231, 76, 60, 0.05);
+}
+
+.log-info {
+  border-left: 4px solid #3498db;
+  background: rgba(52, 152, 219, 0.05);
+}
+
+/* Responsywność */
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+  
+  .main-content {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .card {
+    padding: 1.5rem;
+  }
+  
+  .header h1 {
+    font-size: 2rem;
+  }
+  
+  .header p {
+    font-size: 1rem;
+  }
+  
+  .form-row {
+    flex-direction: column;
+  }
+  
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Animacje ładowania */
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.btn:disabled {
+  animation: pulse 1.5s infinite;
+}
+
+/* Dodatkowe efekty wizualne */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3498db, #9b59b6, #27ae60, #f39c12);
+  border-radius: 12px 12px 0 0;
+}
+
+.card {
+  position: relative;
+}
+
+/* Tooltip style dla długich nazw plików */
+.form-group select option {
+  padding: 0.5rem;
+}
+
+/* Smooth scrolling dla logów */
+.logs {
+  scroll-behavior: smooth;
+}
+
+/* Highlight dla aktywnych elementów */
+input:focus,
+select:focus {
+  position: relative;
+  z-index: 1;
+}
+
+/* Gradient backgrounds dla różnych sekcji */
+.card:nth-child(1) h2 { border-bottom-color: #3498db; }
+.card:nth-child(2) h2 { border-bottom-color: #9b59b6; }
+.card:nth-child(3) h2 { border-bottom-color: #27ae60; }
+.card:nth-child(4) h2 { border-bottom-color: #f39c12; }
+.card:nth-child(5) h2 { border-bottom-color: #e74c3c; }
