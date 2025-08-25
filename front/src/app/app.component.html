@@ -150,7 +150,6 @@
                   required>
                   <option value="csv">CSV</option>
                   <option value="parquet">Parquet</option>
-                  <option value="zip">ZIP</option>
                 </select>
               </div>
               <div class="col-md-3 mb-3">
@@ -162,17 +161,18 @@
                     [(ngModel)]="downloadRequest.pivoted"
                     name="pivoted">
                   <label class="form-check-label" for="pivoted">
-                    Dane pivotowane
+                    Wykonaj pivot
                   </label>
                 </div>
               </div>
-              <div class="col-md-3 mb-3" *ngIf="!downloadRequest.pivoted">
-                <label for="downloadFile" class="form-label">Plik oryginalny</label>
+              <div class="col-md-3 mb-3">
+                <label for="downloadFile" class="form-label">Plik</label>
                 <select 
                   class="form-select" 
                   id="downloadFile"
                   [(ngModel)]="downloadRequest.filename"
-                  name="downloadFile">
+                  name="downloadFile"
+                  (ngModelChange)="onDownloadFileChange($event)">
                   <option value="">Najnowszy plik</option>
                   <option *ngFor="let file of availableFiles" [value]="file.filename">
                     {{ file.filename }}
@@ -180,16 +180,14 @@
                 </select>
               </div>
               <div class="col-md-3 mb-3" *ngIf="downloadRequest.pivoted">
-                <label for="batchDir" class="form-label">Katalog batchów</label>
+                <label for="pivotColumn" class="form-label">Kolumna pivot</label>
                 <select 
                   class="form-select" 
-                  id="batchDir"
-                  [(ngModel)]="downloadRequest.batch_dir"
-                  name="batchDir">
-                  <option value="">Najnowszy katalog</option>
-                  <option *ngFor="let batch of availableBatches" [value]="batch.directory">
-                    {{ batch.directory }} ({{ batch.batch_count }} batchy)
-                  </option>
+                  id="pivotColumn"
+                  [(ngModel)]="downloadRequest.pivot_column"
+                  name="pivotColumn">
+                  <option value="">Auto</option>
+                  <option *ngFor="let col of availableColumns" [value]="col">{{ col }}</option>
                 </select>
               </div>
             </div>

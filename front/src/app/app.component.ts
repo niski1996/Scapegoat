@@ -21,6 +21,8 @@ interface DownloadRequest {
   pivoted: boolean;
   filename?: string;
   batch_dir?: string;
+  // nowość: opcjonalna kolumna pivot
+  pivot_column?: string;
 }
 
 interface FileInfo {
@@ -115,7 +117,8 @@ export class AppComponent implements OnInit {
     format: 'csv',
     pivoted: false,
     filename: '',
-    batch_dir: ''
+    batch_dir: '',
+    pivot_column: ''
   };
   
   // Dane systemu
@@ -123,6 +126,9 @@ export class AppComponent implements OnInit {
   availableBatches: BatchInfo[] = [];
   systemStatus: SystemStatus | null = null;
   operationLogs: OperationLog[] = [];
+  
+  // dostępne kolumny w wybranym pliku (do pivotu)
+  availableColumns: string[] = [];
   
   // Dane raportowania
   tasks: TaskSummary[] = [];
@@ -298,6 +304,10 @@ export class AppComponent implements OnInit {
       if (this.downloadRequest.batch_dir) {
         params.append('batch_dir', this.downloadRequest.batch_dir);
       }
+
+      if (this.downloadRequest.pivoted && this.downloadRequest.pivot_column) {
+        params.append('pivot_column', this.downloadRequest.pivot_column);
+      }
       
       // Pobranie pliku
       const url = `${this.apiUrl}/download?${params.toString()}`;
@@ -323,9 +333,15 @@ export class AppComponent implements OnInit {
       this.availableFiles = response.original_files || [];
       this.availableBatches = response.batch_directories || [];
       
-      // Ustaw domyślnie najnowszy plik do transformacji
-      if (this.availableFiles.length > 0 && !this.transformRequest.input_filename) {
-        this.transformRequest.input_filename = this.availableFiles[0].filename;
+      // Ustaw domyślnie najnowszy plik do transformacji i pobierania
+      if (this.availableFiles.length > 0) {
+        if (!this.transformRequest.input_filename) {
+          this.transformRequest.input_filename = this.availableFiles[0].filename;
+        }
+        if (!this.downloadRequest.filename) {
+          this.downloadRequest.filename = this.availableFiles[0].filename;
+        }
+        await this.loadColumns(this.downloadRequest.filename);
       }
       
     } catch (error: any) {
@@ -333,7 +349,27 @@ export class AppComponent implements OnInit {
       this.addLog('error', `Błąd ładowania listy plików: ${error.error?.detail || error.message}`);
     }
   }
-  
+
+  async loadColumns(filename: string) {
+    if (!filename) {
+      this.availableColumns = [];
+      return;
+    }
+    try {
+      const response = await this.http.get<any>(`${this.apiUrl}/file-schema`, { params: { filename } }).toPromise();
+      const cols: string[] = (response?.columns || []).map((c: any) => c.name || c);
+      this.availableColumns = cols;
+    } catch (error: any) {
+      console.warn('Nie udało się pobrać schematu pliku:', error);
+      this.availableColumns = [];
+    }
+  }
+
+  onDownloadFileChange(filename: string) {
+    this.downloadRequest.filename = filename;
+    this.loadColumns(filename);
+  }
+
   /**
    * Odświeża status systemu
    */

@@ -24,7 +24,7 @@ import shutil
 
 # Import naszych modułów
 from data_generator import generate_parquet, get_parquet_info, log_time, TimeProfiler
-from transformer import pivot_and_batch, get_batch_info
+from transformer import pivot_and_batch, get_batch_info, create_pivot_data
 
 
 # Konfiguracja logowania
@@ -43,7 +43,7 @@ app = FastAPI(
 
 # Enums dla API
 class FileFormat(str, Enum):
-    """Dostępne formaty plików do pobierania."""
+    """Dostępne formaty plików do pobrania."""
     csv = "csv"
     parquet = "parquet"
     zip = "zip"
@@ -195,221 +195,149 @@ async def transform_data(request: TransformRequest):
         raise HTTPException(status_code=500, detail=f"Błąd transformacji danych: {str(e)}")
 
 
+# Pomocnicze funkcje
+def get_parquet_schema(file_path: Path) -> List[Dict[str, str]]:
+    """Zwraca listę kolumn i ich typów z pliku Parquet."""
+    pf = pq.ParquetFile(file_path)
+    schema = pf.schema_arrow
+    return [{"name": f.name, "type": str(f.type)} for f in schema]
+
+
+def flatten_columns(cols) -> List[str]:
+    """Spłaszcza kolumny MultiIndex do nazw czytelnych w CSV."""
+    if hasattr(cols, 'levels') or any(isinstance(c, tuple) for c in cols):
+        out = []
+        for c in cols:
+            if isinstance(c, tuple):
+                # np. (value_col, pivot_value)
+                out.append(f"{c[0]}_{c[1]}")
+            else:
+                out.append(str(c))
+        return out
+    return [str(c) for c in cols]
+
+
+def pivot_dataframe(df: pd.DataFrame, pivot_column: Optional[str]) -> pd.DataFrame:
+    """Wykonuje pivot danych. Gdy pivot_column nie podany, używa domyślnej strategii z transformer.create_pivot_data."""
+    if pivot_column is None:
+        return create_pivot_data(df)
+
+    if pivot_column not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Kolumna pivot '{pivot_column}' nie istnieje w danych")
+
+    # Wybierz kolumnę indeksu (preferuj pierwszą numeryczną, inaczej pierwszą kolumnę)
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    index_col = None
+    for c in df.columns:
+        if c == pivot_column:
+            continue
+        if c in numeric_cols:
+            index_col = c
+            break
+    if index_col is None:
+        # brak kolumny numerycznej poza pivotem – użyj pierwszej różnej od pivotu
+        index_col = next((c for c in df.columns if c != pivot_column), df.columns[0])
+
+    # Kolumny wartości (numeryczne, bez pivotu i indexu)
+    value_cols = [c for c in numeric_cols if c not in {pivot_column, index_col}]
+
+    if value_cols:
+        pivoted = df.pivot_table(index=index_col, columns=pivot_column, values=value_cols, aggfunc='sum', fill_value=0)
+        # Spłaszcz nazwy kolumn
+        if isinstance(pivoted.columns, pd.MultiIndex):
+            pivoted.columns = [f"{c[0]}_{c[1]}" for c in pivoted.columns]
+        else:
+            pivoted.columns = flatten_columns(pivoted.columns)
+    else:
+        # Brak wartości numerycznych – policz wystąpienia
+        tmp_col = df.columns[0]
+        pivoted = df.pivot_table(index=index_col, columns=pivot_column, values=tmp_col, aggfunc='count', fill_value=0)
+        pivoted.columns = [f"count_{c}" for c in pivoted.columns]
+
+    return pivoted.reset_index()
+
+
+def stream_df_as_csv(df: pd.DataFrame, download_name: str = "result.csv") -> StreamingResponse:
+    """Streamuje DataFrame do CSV bez trzymania całego stringa w pamięci."""
+    def gen():
+        # nagłówek
+        header = ",".join(map(str, df.columns)) + "\n"
+        yield header.encode()
+        # dane w chunkach
+        chunk_size = 100_000
+        total = len(df)
+        for start in range(0, total, chunk_size):
+            end = min(start + chunk_size, total)
+            buf = io.StringIO()
+            df.iloc[start:end].to_csv(buf, index=False, header=False)
+            yield buf.getvalue().encode()
+
+    return StreamingResponse(gen(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={download_name}"})
+
+
+@app.get("/file-schema")
+async def file_schema(filename: str = Query(..., description="Nazwa pliku Parquet w katalogu danych")):
+    """Zwraca listę kolumn (nazwa, typ) dla wskazanego pliku Parquet."""
+    file_path = (Path(filename) if Path(filename).is_absolute() else DATA_DIR / filename)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Plik {filename} nie istnieje")
+    try:
+        columns = get_parquet_schema(file_path)
+        return {"filename": filename, "columns": columns}
+    except Exception as e:
+        logger.error(f"Błąd odczytu schematu {filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Błąd odczytu schematu: {e}")
+
+
 @app.get("/download")
 async def download_data(
     format: FileFormat = Query(FileFormat.csv, description="Format pliku do pobrania"),
-    pivoted: bool = Query(False, description="Czy pobierać dane pivotowane (z batchów)"),
-    filename: Optional[str] = Query(None, description="Nazwa pliku oryginalnego (jeśli pivoted=False)"),
-    batch_dir: Optional[str] = Query(None, description="Nazwa katalogu batchów (jeśli pivoted=True)")
+    pivoted: bool = Query(False, description="Czy pivotować dane"),
+    filename: Optional[str] = Query(None, description="Nazwa pliku oryginalnego"),
+    batch_dir: Optional[str] = Query(None, description="(opcjonalnie) Katalog batchów – tryb kompatybilności"),
+    pivot_column: Optional[str] = Query(None, description="(opcjonalnie) Kolumna do pivotowania")
 ):
     """
     Endpoint do pobierania danych w różnych formatach.
-    
-    Args:
-        format: Format pliku (csv lub parquet)
-        pivoted: Czy pobierać dane pivotowane (z batchów)
-        filename: Nazwa konkretnego pliku (dla danych niepivotowanych)
-        batch_dir: Katalog z batchami (dla danych pivotowanych)
+
+    Gdy pivoted=True:
+      - Jeżeli podano batch_dir: zachowany dotychczasowy tryb pobierania z katalogu batchów.
+      - W przeciwnym razie: pivot on-the-fly na wskazanym pliku (filename) z opcjonalnym pivot_column.
     """
     try:
         with TimeProfiler(f"Pobieranie danych w formacie {format.value}"):
-            
             if pivoted:
-                # Pobieranie danych pivotowanych (z batchów)
-                return await download_pivoted_data(format, batch_dir)
+                if batch_dir:
+                    # tryb kompatybilności – pobieranie z batchów
+                    return await download_pivoted_data(format, batch_dir)
+                # pivot on-the-fly na pojedynczym pliku
+                # wybór pliku
+                if not filename:
+                    parquet_files = list(DATA_DIR.glob("*.parquet"))
+                    if not parquet_files:
+                        raise HTTPException(status_code=404, detail="Brak dostępnych plików")
+                    filename = max(parquet_files, key=lambda x: x.stat().st_mtime).name
+                file_path = DATA_DIR / filename
+                if not file_path.exists():
+                    raise HTTPException(status_code=404, detail=f"Plik {filename} nie istnieje")
+
+                df = pd.read_parquet(file_path)
+                pivoted_df = pivot_dataframe(df, pivot_column)
+
+                if format == FileFormat.csv:
+                    return stream_df_as_csv(pivoted_df, download_name="result.csv")
+                else:  # parquet
+                    temp_path = TEMP_DIR / "result.parquet"
+                    pivoted_df.to_parquet(temp_path, compression='snappy')
+                    return FileResponse(path=str(temp_path), filename="result.parquet", media_type="application/octet-stream")
             else:
-                # Pobieranie danych oryginalnych
+                # Pobieranie danych oryginalnych (bez pivotu)
                 return await download_original_data(format, filename)
-    
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Błąd podczas pobierania danych: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Błąd pobierania danych: {str(e)}")
-
-
-async def download_original_data(format: FileFormat, filename: Optional[str]):
-    """
-    Pobiera oryginalne (niepivotowane) dane.
-    """
-    if not filename:
-        # Znajdź najnowszy plik
-        parquet_files = list(DATA_DIR.glob("*.parquet"))
-        if not parquet_files:
-            raise HTTPException(status_code=404, detail="Brak dostępnych plików")
-        
-        # Sortuj według czasu modyfikacji
-        filename = max(parquet_files, key=lambda x: x.stat().st_mtime).name
-    
-    file_path = DATA_DIR / filename
-    
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"Plik {filename} nie istnieje")
-    
-    if format == FileFormat.csv:
-        # Streamowanie CSV
-        return await stream_parquet_as_csv(file_path)
-    elif format == FileFormat.parquet:
-        # Pobieranie Parquet
-        return FileResponse(
-            path=str(file_path),
-            filename=filename,
-            media_type="application/octet-stream"
-        )
-
-
-async def download_pivoted_data(format: FileFormat, batch_dir: Optional[str]):
-    """
-    Pobiera pivotowane dane (z batchów).
-    """
-    if not batch_dir:
-        # Znajdź najnowszy katalog z batchami
-        batch_dirs = [d for d in BATCH_DIR.iterdir() if d.is_dir()]
-        if not batch_dirs:
-            raise HTTPException(status_code=404, detail="Brak dostępnych batchów")
-        
-        batch_dir = max(batch_dirs, key=lambda x: x.stat().st_mtime).name
-    
-    batch_path = BATCH_DIR / batch_dir
-    
-    if not batch_path.exists():
-        raise HTTPException(status_code=404, detail=f"Katalog batchów {batch_dir} nie istnieje")
-    
-    if format == FileFormat.csv:
-        # Zipowane CSV z wszystkich batchów
-        return await create_batched_csv_zip(batch_path)
-    elif format == FileFormat.zip:
-        # Zipowane pliki Parquet
-        return await create_batched_parquet_zip(batch_path)
-    else:  # FileFormat.parquet
-        # Pojedynczy plik Parquet z połączonymi batchami
-        return await create_merged_parquet(batch_path)
-
-
-async def stream_parquet_as_csv(file_path: Path):
-    """
-    Streamuje plik Parquet jako CSV wiersz po wierszu.
-    """
-    def generate_csv_stream():
-        try:
-            # Czytaj plik w chunkach dla efektywności pamięci
-            parquet_file = pq.ParquetFile(file_path)
-            
-            # Header CSV
-            first_batch = parquet_file.read_row_group(0, columns=None).to_pandas()
-            header = ",".join(first_batch.columns) + "\n"
-            yield header.encode()
-            
-            # Dane w chunkach
-            for i in range(parquet_file.metadata.num_row_groups):
-                batch_df = parquet_file.read_row_group(i).to_pandas()
-                
-                # Konwersja do CSV bez nagłówka
-                csv_buffer = io.StringIO()
-                batch_df.to_csv(csv_buffer, index=False, header=False)
-                csv_data = csv_buffer.getvalue()
-                yield csv_data.encode()
-                
-        except Exception as e:
-            logger.error(f"Błąd podczas streamowania CSV: {str(e)}")
-            yield f"Błąd: {str(e)}".encode()
-    
-    filename = file_path.stem + ".csv"
-    
-    return StreamingResponse(
-        generate_csv_stream(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
-
-async def create_batched_csv_zip(batch_path: Path):
-    """
-    Tworzy ZIP z plikami CSV z wszystkich batchów.
-    """
-    zip_filename = f"{batch_path.name}_csv.zip"
-    temp_zip_path = TEMP_DIR / zip_filename
-    
-    with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        batch_files = sorted(batch_path.glob("batch_*.parquet"))
-        
-        for batch_file in batch_files:
-            # Konwersja każdego batchu do CSV
-            df = pd.read_parquet(batch_file)
-            csv_name = batch_file.stem + ".csv"
-            
-            # Dodaj CSV do ZIP
-            csv_buffer = io.StringIO()
-            df.to_csv(csv_buffer, index=False)
-            zipf.writestr(csv_name, csv_buffer.getvalue())
-        
-        # Dodaj manifest
-        manifest_path = batch_path / "batch_manifest.json"
-        if manifest_path.exists():
-            zipf.write(manifest_path, "batch_manifest.json")
-    
-    return FileResponse(
-        path=str(temp_zip_path),
-        filename=zip_filename,
-        media_type="application/zip"
-    )
-
-
-async def create_batched_parquet_zip(batch_path: Path):
-    """
-    Tworzy ZIP z plikami Parquet z wszystkich batchów.
-    """
-    zip_filename = f"{batch_path.name}_parquet.zip"
-    temp_zip_path = TEMP_DIR / zip_filename
-    
-    with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        batch_files = sorted(batch_path.glob("batch_*.parquet"))
-        
-        for batch_file in batch_files:
-            zipf.write(batch_file, batch_file.name)
-        
-        # Dodaj manifest
-        manifest_path = batch_path / "batch_manifest.json"
-        if manifest_path.exists():
-            zipf.write(manifest_path, "batch_manifest.json")
-    
-    return FileResponse(
-        path=str(temp_zip_path),
-        filename=zip_filename,
-        media_type="application/zip"
-    )
-
-
-async def create_merged_parquet(batch_path: Path):
-    """
-    Łączy wszystkie batche w jeden plik Parquet.
-    """
-    merged_filename = f"{batch_path.name}_merged.parquet"
-    temp_merged_path = TEMP_DIR / merged_filename
-    
-    # Znajdź wszystkie pliki batch
-    batch_files = sorted(batch_path.glob("batch_*.parquet"))
-    
-    if not batch_files:
-        raise HTTPException(status_code=404, detail="Brak plików batch w katalogu")
-    
-    # Połącz wszystkie DataFrame
-    dfs = []
-    for batch_file in batch_files:
-        df = pd.read_parquet(batch_file)
-        dfs.append(df)
-    
-    # Połącz w jeden DataFrame
-    merged_df = pd.concat(dfs, ignore_index=True)
-    
-    # Zapisz jako Parquet
-    merged_df.to_parquet(temp_merged_path, compression='snappy')
-    
-    return FileResponse(
-        path=str(temp_merged_path),
-        filename=merged_filename,
-        media_type="application/octet-stream"
-    )
 
 
 @app.get("/files")
@@ -526,6 +454,71 @@ async def cleanup_temp_files():
     except Exception as e:
         logger.error(f"Błąd podczas czyszczenia plików tymczasowych: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Błąd czyszczenia: {str(e)}")
+
+
+async def download_original_data(format: FileFormat, filename: Optional[str]):
+    """
+    Pobiera oryginalne (niepivotowane) dane.
+    """
+    if not filename:
+        # Znajdź najnowszy plik
+        parquet_files = list(DATA_DIR.glob("*.parquet"))
+        if not parquet_files:
+            raise HTTPException(status_code=404, detail="Brak dostępnych plików")
+        
+        # Sortuj według czasu modyfikacji
+        filename = max(parquet_files, key=lambda x: x.stat().st_mtime).name
+    
+    file_path = DATA_DIR / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Plik {filename} nie istnieje")
+    
+    if format == FileFormat.csv:
+        # Streamowanie CSV
+        return await stream_parquet_as_csv(file_path, download_name="result.csv")
+    elif format == FileFormat.parquet:
+        # Pobieranie Parquet
+        return FileResponse(
+            path=str(file_path),
+            filename="result.parquet",
+            media_type="application/octet-stream"
+        )
+
+
+async def stream_parquet_as_csv(file_path: Path, download_name: str = "result.csv"):
+    """
+    Streamuje plik Parquet jako CSV wiersz po wierszu.
+    """
+    def generate_csv_stream():
+        try:
+            # Czytaj plik w chunkach dla efektywności pamięci
+            parquet_file = pq.ParquetFile(file_path)
+            
+            # Header CSV
+            first_batch = parquet_file.read_row_group(0, columns=None).to_pandas()
+            header = ",".join(first_batch.columns) + "\n"
+            yield header.encode()
+            
+            # Dane w chunkach
+            for i in range(parquet_file.metadata.num_row_groups):
+                batch_df = parquet_file.read_row_group(i).to_pandas()
+                
+                # Konwersja do CSV bez nagłówka
+                csv_buffer = io.StringIO()
+                batch_df.to_csv(csv_buffer, index=False, header=False)
+                csv_data = csv_buffer.getvalue()
+                yield csv_data.encode()
+                
+        except Exception as e:
+            logger.error(f"Błąd podczas streamowania CSV: {str(e)}")
+            yield f"Błąd: {str(e)}".encode()
+    
+    return StreamingResponse(
+        generate_csv_stream(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={download_name}"}
+    )
 
 
 if __name__ == "__main__":

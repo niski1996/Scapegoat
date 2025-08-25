@@ -5,7 +5,8 @@
   box-sizing: border-box;
 }
 
-.container {
+/* Page wrapper (zamiast nadpisywać .container Bootstrapa) */
+.page-wrapper {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
@@ -251,7 +252,7 @@
 
 /* Responsywność */
 @media (max-width: 768px) {
-  .container {
+  .page-wrapper {
     padding: 10px;
   }
   
